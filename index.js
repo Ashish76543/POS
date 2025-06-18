@@ -16,6 +16,188 @@ const db = new pg.Client({
 });
 
 db.connect()
+
+import bcrypt from "bcrypt";
+
+
+
+app.post("/updaterights", async (req, res) => {
+  try {
+    const tot = req.body.total;
+
+    for (const user of tot) {
+      await db.query(
+        `UPDATE menu_master 
+         SET item = $1, customer = $2, rights = $3 
+         WHERE username = $4`,
+        [user.item, user.customer, user.rights, user.username]
+      );
+    }
+
+    res.json({ status: "success" });
+  } catch (error) {
+    console.error("Update failed:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+
+
+
+app.get("/getallusers",async(req,res)=>{
+  let result=await db.query("select * from menu_master")
+  console.log(result.rows)
+  res.json(result.rows)
+})
+// Get all customers
+app.post("/getallcustomers", async (req, res) => {
+  let result = await db.query("SELECT * FROM customer_master");
+  
+  res.json(result.rows);
+});
+
+// Insert customer with duplicate check
+app.post("/insertcustomer", async (req, res) => {
+  const { customer_code, customer_name } = req.body;
+
+  if (!customer_code || !customer_name) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+
+  try {
+    const result = await db.query(
+      `INSERT INTO customer_master (customer_code, customer_name)
+       VALUES ($1, $2)
+       RETURNING *;`,
+      [customer_code, customer_name]
+    );
+    res.status(200).json({ message: "success", inserted: result.rows[0] });
+  } catch (err) {
+    if (err.code === "23505") {
+      res.status(409).json({ message: "Customer code already exists" });
+    } else {
+      console.error("Insert error:", err.message);
+      res.status(500).json({ message: "Insert failed", error: err.message });
+    }
+  }
+});
+
+// Delete customer
+app.post("/deletecustomer", async (req, res) => {
+  try {
+    await db.query("DELETE FROM customer_master WHERE customer_code = $1", [req.body.code]);
+    res.json("success");
+  } catch (err) {
+    if (err.code === "23503") {
+      res.status(400).json({ message: "Cannot delete customer: existing transactions found." });
+    } else {
+      console.error("Delete error:", err);
+      res.status(500).json({ message: "Delete failed", error: err.message });
+    }
+  }
+});
+
+
+
+app.post("/deleteitem",async(req,res)=>{
+   console.log(req.body.code)
+  await db.query("delete from item_master where item_code=$1",[req.body.code])
+  res.json("success")
+})
+app.post("/getallitems",async(req,res)=>{
+  let result=await db.query("select * from item_master")
+ res.json(result.rows)
+
+})
+app.post("/insertitem", async (req, res) => {
+  const { item_code, item_name, unit, sales_price } = req.body;
+
+  if (!item_code || !item_name || !unit || sales_price === undefined) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+
+  try {
+    const result = await db.query(
+      `INSERT INTO item_master (item_code, item_name, unit, sales_price)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *;`,
+      [item_code, item_name, unit, parseInt(sales_price)]
+    );
+
+    res.status(200).json({ message: "success", inserted: result.rows[0] });
+
+  } catch (err) {
+    if (err.code === "23505") {
+      res.status(409).json({ message: "Item code already exists" });
+    } else {
+      console.error("Insert error:", err.message);
+      res.status(500).json({ message: "Insert failed", error: err.message });
+    }
+  }
+});
+
+
+app.post("/getrights", async (req, res) => {
+  const { name } = req.body;
+
+  try {
+    const result = await db.query("SELECT * FROM menu_master WHERE username = $1", [name]);
+
+    if (result.rows.length === 0) {
+      return res.json({ message: "fail" });
+    }
+
+    res.json({ val: result.rows[0], message: "success" }); 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "server error" });
+  }
+});
+app.post("/usersubmit", async (req, res) => {
+  const { name, password, typ } = req.body;
+
+  try {
+    if (typ === "register") {
+      const userCheck = await db.query("SELECT * FROM user_master WHERE name = $1", [name]);
+
+      if (userCheck.rows.length === 0) {
+        
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        await db.query(
+          "INSERT INTO user_master (name, password) VALUES ($1, $2)",
+          [name, hashedPassword]
+        );
+        await db.query("insert into menu_master (username) values ($1)",[name])
+        return res.json("registered successfully");
+      } else {
+        return res.json("user already exists");
+      }
+    } else {
+      const user = await db.query("SELECT * FROM user_master WHERE name = $1", [name]);
+
+      if (user.rows.length === 0) {
+        return res.json("invalid user");
+      }
+
+      const hashedPassword = user.rows[0].password;
+
+      const isMatch = await bcrypt.compare(password, hashedPassword);
+
+      if (!isMatch) {
+        return res.json("invalid password");
+      }
+
+      return res.json("login success");
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json("server error");
+  }
+});
+
+
+
 app.post("/getinvoicenumber", async (req, res) => {
     try {
         let result = await db.query("SELECT MAX(Invoice_no) FROM Transaction_master");
